@@ -1,16 +1,14 @@
 #include "duckdb/execution/operator/helper/physical_load.hpp"
 #include "duckdb/common/file_system.hpp"
+#include "duckdb/common/windows.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/client_context.hpp"
 
 #ifndef _WIN32
 #include <dlfcn.h>
 #else
-#include <windows.h>
-
 #define RTLD_LAZY  0
 #define RTLD_LOCAL 0
-
 #endif
 
 namespace duckdb {
@@ -28,7 +26,7 @@ void *dlsym(void *handle, const char *name) {
 }
 #endif
 
-void PhysicalLoad::GetChunkInternal(ExecutionContext &context, DataChunk &chunk, PhysicalOperatorState *state) {
+void PhysicalLoad::GetChunkInternal(ExecutionContext &context, DataChunk &chunk, PhysicalOperatorState *state) const {
 	auto &fs = FileSystem::GetFileSystem(context.client);
 	auto filename = fs.ConvertSeparators(info->filename);
 	if (!fs.FileExists(filename)) {

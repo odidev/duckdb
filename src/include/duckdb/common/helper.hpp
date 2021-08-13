@@ -25,7 +25,7 @@ unique_ptr<T> make_unique(Args &&... args) {
 using std::make_unique;
 #endif
 template <typename S, typename T, typename... Args>
-unique_ptr<S> make_unique_base(Args &&...args) {
+unique_ptr<S> make_unique_base(Args &&... args) {
 	return unique_ptr<S>(new T(std::forward<Args>(args)...));
 }
 
@@ -33,6 +33,20 @@ template <typename T, typename S>
 unique_ptr<S> unique_ptr_cast(unique_ptr<T> src) {
 	return unique_ptr<S>(static_cast<S *>(src.release()));
 }
+
+struct SharedConstructor {
+	template <class T, typename... ARGS>
+	static shared_ptr<T> Create(ARGS &&...args) {
+		return make_shared<T>(std::forward<ARGS>(args)...);
+	}
+};
+
+struct UniqueConstructor {
+	template <class T, typename... ARGS>
+	static unique_ptr<T> Create(ARGS &&...args) {
+		return make_unique<T>(std::forward<ARGS>(args)...);
+	}
+};
 
 template <typename T>
 T MaxValue(T a, T b) {
@@ -45,6 +59,16 @@ T MinValue(T a, T b) {
 }
 
 template <typename T>
+T AbsValue(T a) {
+	return a < 0 ? -a : a;
+}
+
+template <typename T>
+T SignValue(T a) {
+	return a < 0 ? -1 : 1;
+}
+
+template <typename T>
 const T Load(const_data_ptr_t ptr) {
 	T ret;
 	memcpy(&ret, ptr, sizeof(ret));
@@ -54,6 +78,19 @@ const T Load(const_data_ptr_t ptr) {
 template <typename T>
 void Store(const T val, data_ptr_t ptr) {
 	memcpy(ptr, (void *)&val, sizeof(val));
+}
+
+//! This assigns a shared pointer, but ONLY assigns if "target" is not equal to "source"
+//! If this is often the case, this manner of assignment is significantly faster (~20X faster)
+//! Since it avoids the need of an atomic incref/decref at the cost of a single pointer comparison
+//! Benchmark: https://gist.github.com/Mytherin/4db3faa8e233c4a9b874b21f62bb4b96
+//! If the shared pointers are not the same, the penalty is very low (on the order of 1%~ slower)
+//! This method should always be preferred if there is a (reasonable) chance that the pointers are the same
+template<class T>
+void AssignSharedPointer(shared_ptr<T> &target, const shared_ptr<T> &source) {
+	if (target.get() != source.get()) {
+		target = source;
+	}
 }
 
 } // namespace duckdb

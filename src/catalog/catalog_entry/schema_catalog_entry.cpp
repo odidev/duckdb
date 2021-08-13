@@ -38,8 +38,8 @@ SchemaCatalogEntry::SchemaCatalogEntry(Catalog *catalog, string name_p, bool int
     : CatalogEntry(CatalogType::SCHEMA_ENTRY, catalog, move(name_p)),
       tables(*catalog, make_unique<DefaultViewGenerator>(*catalog, this)), indexes(*catalog), table_functions(*catalog),
       copy_functions(*catalog), pragma_functions(*catalog),
-      functions(*catalog, name == DEFAULT_SCHEMA ? make_unique<DefaultFunctionGenerator>(*catalog, this) : nullptr),
-      sequences(*catalog), collations(*catalog) {
+      functions(*catalog, make_unique<DefaultFunctionGenerator>(*catalog, this)), sequences(*catalog),
+      collations(*catalog) {
 	this->internal = internal;
 }
 
@@ -147,7 +147,7 @@ CatalogEntry *SchemaCatalogEntry::CreateFunction(ClientContext &context, CreateF
 		                                                                          (CreateAggregateFunctionInfo *)info);
 		break;
 	default:
-		throw CatalogException("Unknown function type \"%s\"", CatalogTypeToString(info->type));
+		throw InternalException("Unknown function type \"%s\"", CatalogTypeToString(info->type));
 	}
 	return AddEntry(context, move(function), info->on_conflict);
 }
@@ -250,7 +250,7 @@ CatalogSet &SchemaCatalogEntry::GetCatalogSet(CatalogType type) {
 	case CatalogType::COLLATION_ENTRY:
 		return collations;
 	default:
-		throw CatalogException("Unsupported catalog type in schema");
+		throw InternalException("Unsupported catalog type in schema");
 	}
 }
 

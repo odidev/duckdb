@@ -34,7 +34,7 @@ static AggregateFunction GetBitfieldUnaryAggregate(LogicalType type) {
 	case LogicalTypeId::UBIGINT:
 		return AggregateFunction::UnaryAggregate<BitState<uint64_t>, uint64_t, uint64_t, OP>(type, type);
 	default:
-		throw NotImplementedException("Unimplemented bitfield type for unary aggregate");
+		throw InternalException("Unimplemented bitfield type for unary aggregate");
 	}
 }
 
@@ -72,7 +72,7 @@ struct BitAndOperation {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (!source.is_set) {
 			// source is NULL, nothing to do.
 			return;
@@ -132,7 +132,7 @@ struct BitOrOperation {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (!source.is_set) {
 			// source is NULL, nothing to do.
 			return;
@@ -192,7 +192,7 @@ struct BitXorOperation {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (!source.is_set) {
 			// source is NULL, nothing to do.
 			return;

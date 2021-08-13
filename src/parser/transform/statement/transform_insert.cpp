@@ -10,9 +10,7 @@ unique_ptr<TableRef> Transformer::TransformValuesList(duckdb_libpgquery::PGList 
 		auto target = (duckdb_libpgquery::PGList *)(value_list->data.ptr_value);
 
 		vector<unique_ptr<ParsedExpression>> insert_values;
-		if (!TransformExpressionList(target, insert_values)) {
-			throw ParserException("Could not parse expression list!");
-		}
+		TransformExpressionList(*target, insert_values, 0);
 		if (!result->values.empty()) {
 			if (result->values[0].size() != insert_values.size()) {
 				throw ParserException("VALUES lists must all be the same length");
@@ -27,6 +25,9 @@ unique_ptr<TableRef> Transformer::TransformValuesList(duckdb_libpgquery::PGList 
 unique_ptr<InsertStatement> Transformer::TransformInsert(duckdb_libpgquery::PGNode *node) {
 	auto stmt = reinterpret_cast<duckdb_libpgquery::PGInsertStmt *>(node);
 	D_ASSERT(stmt);
+	if (stmt->onConflictClause && stmt->onConflictClause->action != duckdb_libpgquery::PG_ONCONFLICT_NONE) {
+		throw ParserException("ON CONFLICT IGNORE/UPDATE clauses are not supported");
+	}
 
 	auto result = make_unique<InsertStatement>();
 

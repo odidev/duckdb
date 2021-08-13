@@ -204,9 +204,19 @@ int64_t CastRules::ImplicitCast(const LogicalType &from, const LogicalType &to) 
 	}
 	if (from.id() == LogicalTypeId::LIST && to.id() == LogicalTypeId::LIST) {
 		// Lists can be cast if their child types can be cast
-		D_ASSERT(!from.child_types().empty());
-		D_ASSERT(!to.child_types().empty());
-		return ImplicitCast(from.child_types()[0].second, to.child_types()[0].second);
+		return ImplicitCast(ListType::GetChildType(from), ListType::GetChildType(to));
+	}
+	if ((from.id() == LogicalTypeId::TIMESTAMP_SEC || from.id() == LogicalTypeId::TIMESTAMP_MS ||
+	     from.id() == LogicalTypeId::TIMESTAMP_NS) &&
+	    to.id() == LogicalTypeId::TIMESTAMP) {
+		//! Any timestamp type can be converted to the default (us) type at low cost
+		return 101;
+	}
+	if ((to.id() == LogicalTypeId::TIMESTAMP_SEC || to.id() == LogicalTypeId::TIMESTAMP_MS ||
+	     to.id() == LogicalTypeId::TIMESTAMP_NS) &&
+	    from.id() == LogicalTypeId::TIMESTAMP) {
+		//! Any timestamp type can be converted to the default (us) type at low cost
+		return 100;
 	}
 	switch (from.id()) {
 	case LogicalTypeId::TINYINT:

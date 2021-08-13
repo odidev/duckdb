@@ -20,7 +20,7 @@ struct SumSetOperation {
 		state->isset = false;
 	}
 	template <class STATE>
-	static void Combine(STATE source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		target->isset = source.isset || target->isset;
 		target->value += source.value;
 	}
@@ -98,7 +98,6 @@ unique_ptr<BaseStatistics> SumPropagateStats(ClientContext &context, BoundAggreg
 			max_positive = numeric_stats.max.GetValueUnsafe<int64_t>();
 			break;
 		default:
-			// unhandled type here
 			throw InternalException("Unsupported type for propagate sum stats");
 		}
 		auto max_sum_negative = max_negative * hugeint_t(node_stats->max_cardinality);
@@ -129,7 +128,7 @@ unique_ptr<BaseStatistics> SumPropagateStats(ClientContext &context, BoundAggreg
 	return nullptr;
 }
 
-AggregateFunction GetSumAggregate(PhysicalType type) {
+AggregateFunction SumFun::GetSumAggregate(PhysicalType type) {
 	switch (type) {
 	case PhysicalType::INT16:
 		return AggregateFunction::UnaryAggregate<SumState<int64_t>, int16_t, hugeint_t, IntegerSumOperation>(
@@ -152,25 +151,25 @@ AggregateFunction GetSumAggregate(PhysicalType type) {
 		return AggregateFunction::UnaryAggregate<SumState<hugeint_t>, hugeint_t, hugeint_t, HugeintSumOperation>(
 		    LogicalType::HUGEINT, LogicalType::HUGEINT);
 	default:
-		throw NotImplementedException("Unimplemented sum aggregate");
+		throw InternalException("Unimplemented sum aggregate");
 	}
 }
 
 unique_ptr<FunctionData> BindDecimalSum(ClientContext &context, AggregateFunction &function,
                                         vector<unique_ptr<Expression>> &arguments) {
 	auto decimal_type = arguments[0]->return_type;
-	function = GetSumAggregate(decimal_type.InternalType());
+	function = SumFun::GetSumAggregate(decimal_type.InternalType());
 	function.name = "sum";
 	function.arguments[0] = decimal_type;
-	function.return_type = LogicalType(LogicalTypeId::DECIMAL, Decimal::MAX_WIDTH_DECIMAL, decimal_type.scale());
+	function.return_type = LogicalType::DECIMAL(Decimal::MAX_WIDTH_DECIMAL, DecimalType::GetScale(decimal_type));
 	return nullptr;
 }
 
 void SumFun::RegisterFunction(BuiltinFunctions &set) {
 	AggregateFunctionSet sum("sum");
 	// decimal
-	sum.AddFunction(AggregateFunction({LogicalType::DECIMAL}, LogicalType::DECIMAL, nullptr, nullptr, nullptr, nullptr,
-	                                  nullptr, nullptr, BindDecimalSum));
+	sum.AddFunction(AggregateFunction({LogicalTypeId::DECIMAL}, LogicalTypeId::DECIMAL, nullptr, nullptr, nullptr,
+	                                  nullptr, nullptr, nullptr, BindDecimalSum));
 	sum.AddFunction(GetSumAggregate(PhysicalType::INT16));
 	sum.AddFunction(GetSumAggregate(PhysicalType::INT32));
 	sum.AddFunction(GetSumAggregate(PhysicalType::INT64));

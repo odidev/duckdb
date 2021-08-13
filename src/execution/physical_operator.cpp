@@ -19,19 +19,18 @@ string PhysicalOperator::ToString() const {
 }
 
 PhysicalOperatorState::PhysicalOperatorState(PhysicalOperator &op, PhysicalOperator *child) : finished(false) {
-	op.InitializeChunk(initial_chunk);
 	if (child) {
-		child->InitializeChunkEmpty(child_chunk);
+		child->InitializeChunk(child_chunk);
 		child_state = child->GetOperatorState();
 	}
 }
 
-void PhysicalOperator::GetChunk(ExecutionContext &context, DataChunk &chunk, PhysicalOperatorState *state) {
+void PhysicalOperator::GetChunk(ExecutionContext &context, DataChunk &chunk, PhysicalOperatorState *state) const {
 	if (context.client.interrupted) {
 		throw InterruptException();
 	}
 	// reset the chunk back to its initial state
-	chunk.Reference(state->initial_chunk);
+	chunk.Reset();
 
 	if (state->finished) {
 		return;
@@ -45,8 +44,10 @@ void PhysicalOperator::GetChunk(ExecutionContext &context, DataChunk &chunk, Phy
 	chunk.Verify();
 }
 
+// LCOV_EXCL_START
 void PhysicalOperator::Print() {
 	Printer::Print(ToString());
 }
+// LCOV_EXCL_STOP
 
 } // namespace duckdb

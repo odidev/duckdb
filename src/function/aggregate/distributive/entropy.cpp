@@ -9,8 +9,19 @@ namespace duckdb {
 
 template <class T>
 struct EntropyState {
+	using DistinctMap = unordered_map<T, idx_t>;
+
 	idx_t count;
-	unordered_map<T, idx_t> *distinct;
+	DistinctMap *distinct;
+
+	EntropyState &operator=(const EntropyState &other) = delete;
+
+	EntropyState &Assign(const EntropyState &other) {
+		D_ASSERT(!distinct);
+		distinct = new DistinctMap(*other.distinct);
+		count = other.count;
+		return *this;
+	}
 };
 
 struct EntropyFunctionBase {
@@ -21,14 +32,12 @@ struct EntropyFunctionBase {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE &source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (!source.distinct) {
 			return;
 		}
 		if (!target->distinct) {
-			target->distinct = source.distinct;
-			target->count = source.count;
-			source.distinct = nullptr;
+			target->Assign(source);
 			return;
 		}
 		for (auto &val : *source.distinct) {
@@ -133,7 +142,7 @@ AggregateFunction GetEntropyFunction(PhysicalType type) {
 		                                                                          LogicalType::DOUBLE);
 
 	default:
-		throw NotImplementedException("Unimplemented approximate_count aggregate");
+		throw InternalException("Unimplemented approximate_count aggregate");
 	}
 }
 

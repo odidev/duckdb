@@ -807,22 +807,6 @@ public class TestDuckDBJDBC {
 		assertFalse(rs.next());
 		rs.close();
 
-		rs = md.getSchemas();
-		assertTrue(rs.next());
-		assertEquals(rs.getString("TABLE_SCHEM"), "main");
-		assertNull(rs.getObject("TABLE_CATALOG"));
-		assertEquals(rs.getString(1), "main");
-		assertNull(rs.getObject(2));
-
-		assertTrue(rs.next());
-		assertEquals(rs.getString("TABLE_SCHEM"), "temp");
-		assertNull(rs.getObject("TABLE_CATALOG"));
-		assertEquals(rs.getString(1), "temp");
-		assertNull(rs.getObject(2));
-
-		assertFalse(rs.next());
-		rs.close();
-
 		rs = md.getSchemas(null, "ma%");
 		assertTrue(rs.next());
 		assertEquals(rs.getString("TABLE_SCHEM"), "main");
@@ -1010,7 +994,7 @@ public class TestDuckDBJDBC {
 		Connection conn = DriverManager.getConnection("jdbc:duckdb:");
 		Statement stmt = conn.createStatement();
 		ResultSet rs = stmt
-				.executeQuery("SELECT COUNT(*) FROM parquet_scan('test/sql/copy/parquet/data/userdata1.parquet')");
+				.executeQuery("SELECT COUNT(*) FROM parquet_scan('data/parquet-testing/userdata1.parquet')");
 		assertTrue(rs.next());
 		assertEquals(rs.getInt(1), 1000);
 		rs.close();

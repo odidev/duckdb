@@ -11,9 +11,11 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
+#include "duckdb/function/aggregate_function.hpp"
 
 namespace duckdb {
 struct FunctionData;
+typedef std::pair<idx_t, idx_t> FrameBounds;
 
 class AggregateExecutor {
 private:
@@ -301,7 +303,7 @@ public:
 	template <class STATE_TYPE, class OP>
 	static void Combine(Vector &source, Vector &target, idx_t count) {
 		D_ASSERT(source.GetType().id() == LogicalTypeId::POINTER && target.GetType().id() == LogicalTypeId::POINTER);
-		auto sdata = FlatVector::GetData<STATE_TYPE *>(source);
+		auto sdata = FlatVector::GetData<const STATE_TYPE *>(source);
 		auto tdata = FlatVector::GetData<STATE_TYPE *>(target);
 
 		for (idx_t i = 0; i < count; i++) {
@@ -310,7 +312,7 @@ public:
 	}
 
 	template <class STATE_TYPE, class RESULT_TYPE, class OP>
-	static void Finalize(Vector &states, FunctionData *bind_data, Vector &result, idx_t count) {
+	static void Finalize(Vector &states, FunctionData *bind_data, Vector &result, idx_t count, idx_t offset) {
 		if (states.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 			result.SetVectorType(VectorType::CONSTANT_VECTOR);
 
@@ -326,9 +328,19 @@ public:
 			auto rdata = FlatVector::GetData<RESULT_TYPE>(result);
 			for (idx_t i = 0; i < count; i++) {
 				OP::template Finalize<RESULT_TYPE, STATE_TYPE>(result, bind_data, sdata[i], rdata,
-				                                               FlatVector::Validity(result), i);
+				                                               FlatVector::Validity(result), i + offset);
 			}
 		}
+	}
+
+	template <class STATE, class INPUT_TYPE, class RESULT_TYPE, class OP>
+	static void UnaryWindow(Vector &input, FunctionData *bind_data, data_ptr_t state, const FrameBounds &frame,
+	                        const FrameBounds &prev, Vector &result, idx_t rid) {
+
+		auto idata = FlatVector::GetData<const INPUT_TYPE>(input) - MinValue(frame.first, prev.first);
+		const auto &ivalid = FlatVector::Validity(input);
+		OP::template Window<STATE, INPUT_TYPE, RESULT_TYPE>(idata, ivalid, bind_data, (STATE *)state, frame, prev,
+		                                                    result, rid);
 	}
 
 	template <class STATE_TYPE, class OP>

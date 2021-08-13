@@ -32,12 +32,10 @@ static void ListUpdateFunction(Vector inputs[], FunctionData *, idx_t input_coun
 	auto &input = inputs[0];
 	VectorData sdata;
 	state_vector.Orrify(count, sdata);
-	child_list_t<LogicalType> child_types;
-	child_types.push_back({"", input.GetType()});
-	LogicalType list_vector_type(LogicalType::LIST.id(), child_types);
+
+	auto list_vector_type = LogicalType::LIST(input.GetType());
 
 	auto states = (ListAggState **)sdata.data;
-	SelectionVector sel(STANDARD_VECTOR_SIZE);
 	if (input.GetVectorType() == VectorType::SEQUENCE_VECTOR) {
 		input.Normalify(count);
 	}
@@ -45,8 +43,6 @@ static void ListUpdateFunction(Vector inputs[], FunctionData *, idx_t input_coun
 		auto state = states[sdata.sel->get_index(i)];
 		if (!state->list_vector) {
 			state->list_vector = new Vector(list_vector_type);
-			auto list_child = make_unique<Vector>(input.GetType());
-			ListVector::SetEntry(*state->list_vector, move(list_child));
 		}
 		ListVector::Append(*state->list_vector, input, i + 1, i);
 	}
@@ -70,15 +66,15 @@ static void ListCombineFunction(Vector &state, Vector &combined, idx_t count) {
 	}
 }
 
-static void ListFinalize(Vector &state_vector, FunctionData *, Vector &result, idx_t count) {
+static void ListFinalize(Vector &state_vector, FunctionData *, Vector &result, idx_t count, idx_t offset) {
 	VectorData sdata;
 	state_vector.Orrify(count, sdata);
 	auto states = (ListAggState **)sdata.data;
 
 	D_ASSERT(result.GetType().id() == LogicalTypeId::LIST);
-	result.Initialize(result.GetType()); // deals with constants
+
 	auto &mask = FlatVector::Validity(result);
-	size_t total_len = 0;
+	size_t total_len = ListVector::GetListSize(result);
 	for (idx_t i = 0; i < count; i++) {
 		auto state = states[sdata.sel->get_index(i)];
 		if (!state->list_vector) {
@@ -89,13 +85,12 @@ static void ListFinalize(Vector &state_vector, FunctionData *, Vector &result, i
 		auto list_struct_data = FlatVector::GetData<list_entry_t>(result);
 		auto &state_lv = *state->list_vector;
 		auto state_lv_count = ListVector::GetListSize(state_lv);
-		list_struct_data[i].length = state_lv_count;
-		list_struct_data[i].offset = total_len;
+		const auto rid = i + offset;
+		list_struct_data[rid].length = state_lv_count;
+		list_struct_data[rid].offset = total_len;
 		total_len += state_lv_count;
 	}
 
-	auto list_buffer = make_unique<Vector>(result.GetType().child_types()[0].second);
-	ListVector::SetEntry(result, move(list_buffer));
 	for (idx_t i = 0; i < count; i++) {
 		auto state = states[sdata.sel->get_index(i)];
 		if (!state->list_vector) {
@@ -110,17 +105,14 @@ static void ListFinalize(Vector &state_vector, FunctionData *, Vector &result, i
 unique_ptr<FunctionData> ListBindFunction(ClientContext &context, AggregateFunction &function,
                                           vector<unique_ptr<Expression>> &arguments) {
 	D_ASSERT(arguments.size() == 1);
-	child_list_t<LogicalType> children;
-	children.push_back(make_pair("", arguments[0]->return_type));
-
-	function.return_type = LogicalType(LogicalTypeId::LIST, move(children));
+	function.return_type = LogicalType::LIST(arguments[0]->return_type);
 	return make_unique<ListBindData>(); // TODO atm this is not used anywhere but it might not be required after all
 	                                    // except for sanity checking
 }
 
 void ListFun::RegisterFunction(BuiltinFunctions &set) {
 	auto agg = AggregateFunction(
-	    "list", {LogicalType::ANY}, LogicalType::LIST, AggregateFunction::StateSize<ListAggState>,
+	    "list", {LogicalType::ANY}, LogicalTypeId::LIST, AggregateFunction::StateSize<ListAggState>,
 	    AggregateFunction::StateInitialize<ListAggState, ListFunction>, ListUpdateFunction, ListCombineFunction,
 	    ListFinalize, nullptr, ListBindFunction, AggregateFunction::StateDestroy<ListAggState, ListFunction>);
 	set.AddFunction(agg);

@@ -19,22 +19,18 @@ struct ApproxCountDistinctFunctionBase {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE &source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (!source.log) {
 			return;
 		}
 		if (!target->log) {
-			target->log = source.log;
-			source.log = nullptr;
-			return;
+			target->log = new HyperLogLog();
 		}
-		auto new_log = target->log->MergePointer(*source.log);
 		D_ASSERT(target->log);
 		D_ASSERT(source.log);
+		auto new_log = target->log->MergePointer(*source.log);
 		delete target->log;
-		delete source.log;
 		target->log = new_log;
-		source.log = nullptr;
 	}
 
 	template <class T, class STATE>
@@ -135,7 +131,7 @@ AggregateFunction GetApproxCountDistinctFunction(PhysicalType type) {
 		                                                                                      LogicalType::BIGINT);
 
 	default:
-		throw NotImplementedException("Unimplemented approximate_count aggregate");
+		throw InternalException("Unimplemented approximate_count aggregate");
 	}
 }
 

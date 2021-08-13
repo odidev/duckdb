@@ -5,11 +5,12 @@
 
 #include "duckdb/storage/data_table.hpp"
 #include "duckdb/storage/write_ahead_log.hpp"
-#include "duckdb/storage/uncompressed_segment.hpp"
 #include "duckdb/catalog/catalog_set.hpp"
 #include "duckdb/common/serializer/buffered_deserializer.hpp"
 #include "duckdb/parser/parsed_data/alter_table_info.hpp"
 #include "duckdb/storage/table/update_segment.hpp"
+#include "duckdb/storage/table/column_data.hpp"
+#include "duckdb/storage/table/row_group.hpp"
 
 #include "duckdb/storage/table/chunk_info.hpp"
 
@@ -80,25 +81,34 @@ void CommitState::WriteCatalogEntry(CatalogEntry *entry, data_ptr_t dataptr) {
 		log->WriteCreateMacro((MacroCatalogEntry *)parent);
 		break;
 	case CatalogType::DELETED_ENTRY:
-		if (entry->type == CatalogType::TABLE_ENTRY) {
+		switch (entry->type) {
+		case CatalogType::TABLE_ENTRY: {
 			auto table_entry = (TableCatalogEntry *)entry;
 			table_entry->CommitDrop();
 			log->WriteDropTable(table_entry);
-		} else if (entry->type == CatalogType::SCHEMA_ENTRY) {
+			break;
+		}
+		case CatalogType::SCHEMA_ENTRY:
 			log->WriteDropSchema((SchemaCatalogEntry *)entry);
-		} else if (entry->type == CatalogType::VIEW_ENTRY) {
+			break;
+		case CatalogType::VIEW_ENTRY:
 			log->WriteDropView((ViewCatalogEntry *)entry);
-		} else if (entry->type == CatalogType::SEQUENCE_ENTRY) {
+			break;
+		case CatalogType::SEQUENCE_ENTRY:
 			log->WriteDropSequence((SequenceCatalogEntry *)entry);
-		} else if (entry->type == CatalogType::MACRO_ENTRY) {
+			break;
+		case CatalogType::MACRO_ENTRY:
 			log->WriteDropMacro((MacroCatalogEntry *)entry);
-		} else if (entry->type == CatalogType::PREPARED_STATEMENT) {
-			// do nothing, prepared statements aren't persisted to disk
-		} else {
-			throw NotImplementedException("Don't know how to drop this type!");
+			break;
+		case CatalogType::INDEX_ENTRY:
+		case CatalogType::PREPARED_STATEMENT:
+		case CatalogType::SCALAR_FUNCTION_ENTRY:
+			// do nothing, indexes/prepared statements/functions aren't persisted to disk
+			break;
+		default:
+			throw InternalException("Don't know how to drop this type!");
 		}
 		break;
-
 	case CatalogType::INDEX_ENTRY:
 	case CatalogType::PREPARED_STATEMENT:
 	case CatalogType::AGGREGATE_FUNCTION_ENTRY:
@@ -110,7 +120,7 @@ void CommitState::WriteCatalogEntry(CatalogEntry *entry, data_ptr_t dataptr) {
 		// do nothing, these entries are not persisted to disk
 		break;
 	default:
-		throw NotImplementedException("UndoBuffer - don't know how to write this entry to the WAL");
+		throw InternalException("UndoBuffer - don't know how to write this entry to the WAL");
 	}
 }
 
@@ -136,8 +146,11 @@ void CommitState::WriteUpdate(UpdateInfo *info) {
 	D_ASSERT(log);
 	// switch to the current table, if necessary
 	auto &column_data = info->segment->column_data;
-	SwitchTable(&column_data.table_info, UndoFlags::UPDATE_TUPLE);
+	auto &table_info = column_data.GetTableInfo();
 
+	SwitchTable(&table_info, UndoFlags::UPDATE_TUPLE);
+
+	// initialize the update chunk
 	vector<LogicalType> update_types;
 	if (column_data.type.id() == LogicalTypeId::VALIDITY) {
 		update_types.push_back(LogicalType::BOOLEAN);
@@ -154,14 +167,33 @@ void CommitState::WriteUpdate(UpdateInfo *info) {
 
 	// write the row ids into the chunk
 	auto row_ids = FlatVector::GetData<row_t>(update_chunk->data[1]);
-	idx_t start = info->segment->start + info->vector_index * STANDARD_VECTOR_SIZE;
+	idx_t start = column_data.start + info->vector_index * STANDARD_VECTOR_SIZE;
 	for (idx_t i = 0; i < info->N; i++) {
 		row_ids[info->tuples[i]] = start + info->tuples[i];
+	}
+	if (column_data.type.id() == LogicalTypeId::VALIDITY) {
+		// zero-initialize the booleans
+		// FIXME: this is only required because of NullValue<T> in Vector::Serialize...
+		auto booleans = FlatVector::GetData<bool>(update_chunk->data[0]);
+		for (idx_t i = 0; i < info->N; i++) {
+			auto idx = info->tuples[i];
+			booleans[idx] = false;
+		}
 	}
 	SelectionVector sel(info->tuples);
 	update_chunk->Slice(sel, info->N);
 
-	log->WriteUpdate(*update_chunk, column_data.column_idx);
+	// construct the column index path
+	vector<column_t> column_indexes;
+	auto column_data_ptr = &column_data;
+	while (column_data_ptr->parent) {
+		column_indexes.push_back(column_data_ptr->column_index);
+		column_data_ptr = column_data_ptr->parent;
+	}
+	column_indexes.push_back(info->column_index);
+	std::reverse(column_indexes.begin(), column_indexes.end());
+
+	log->WriteUpdate(*update_chunk, column_indexes);
 }
 
 template <bool HAS_LOG>
@@ -204,14 +236,14 @@ void CommitState::CommitEntry(UndoFlags type, data_ptr_t data) {
 	case UndoFlags::UPDATE_TUPLE: {
 		// update:
 		auto info = (UpdateInfo *)data;
-		if (HAS_LOG && !info->segment->column_data.table_info.IsTemporary()) {
+		if (HAS_LOG && !info->segment->column_data.GetTableInfo().IsTemporary()) {
 			WriteUpdate(info);
 		}
 		info->version_number = commit_id;
 		break;
 	}
 	default:
-		throw NotImplementedException("UndoBuffer - don't know how to commit this type!");
+		throw InternalException("UndoBuffer - don't know how to commit this type!");
 	}
 }
 
@@ -249,7 +281,7 @@ void CommitState::RevertCommit(UndoFlags type, data_ptr_t data) {
 		break;
 	}
 	default:
-		throw NotImplementedException("UndoBuffer - don't know how to revert commit of this type!");
+		throw InternalException("UndoBuffer - don't know how to revert commit of this type!");
 	}
 }
 

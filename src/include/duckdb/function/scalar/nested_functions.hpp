@@ -36,7 +36,21 @@ struct ListValueFun {
 	static void RegisterFunction(BuiltinFunctions &set);
 };
 
+struct ListRangeFun {
+	static void RegisterFunction(BuiltinFunctions &set);
+};
+
+struct MapFun {
+	static void RegisterFunction(BuiltinFunctions &set);
+};
+
+struct MapExtractFun {
+	static void RegisterFunction(BuiltinFunctions &set);
+};
 struct ListExtractFun {
+	static void RegisterFunction(BuiltinFunctions &set);
+};
+struct CardinalityFun {
 	static void RegisterFunction(BuiltinFunctions &set);
 };
 

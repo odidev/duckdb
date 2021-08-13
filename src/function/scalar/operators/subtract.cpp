@@ -32,6 +32,20 @@ double SubtractOperator::Operation(double left, double right) {
 }
 
 template <>
+int64_t SubtractOperator::Operation(date_t left, date_t right) {
+	return int64_t(left.days) - int64_t(right.days);
+}
+
+template <>
+date_t SubtractOperator::Operation(date_t left, int32_t right) {
+	int32_t result;
+	if (!TrySubtractOperator::Operation(left.days, right, result)) {
+		throw OutOfRangeException("Date out of range");
+	}
+	return date_t(result);
+}
+
+template <>
 interval_t SubtractOperator::Operation(interval_t left, interval_t right) {
 	interval_t result;
 	result.months = left.months - right.months;
@@ -127,10 +141,6 @@ template <>
 bool TrySubtractOperator::Operation(int64_t left, int64_t right, int64_t &result) {
 #if (__GNUC__ >= 5) || defined(__clang__)
 	if (__builtin_sub_overflow(left, right, &result)) {
-		return false;
-	}
-	// FIXME: this check can be removed if we get rid of NullValue<T>
-	if (result == std::numeric_limits<int64_t>::min()) {
 		return false;
 	}
 #else

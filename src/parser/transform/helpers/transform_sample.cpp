@@ -25,7 +25,7 @@ unique_ptr<SampleOptions> Transformer::TransformSampleOptions(duckdb_libpgquery:
 	auto result = make_unique<SampleOptions>();
 	auto &sample_options = (duckdb_libpgquery::PGSampleOptions &)*options;
 	auto &sample_size = (duckdb_libpgquery::PGSampleSize &)*sample_options.sample_size;
-	auto sample_value = TransformValue(sample_size.sample_size)->value;
+	auto sample_value = TransformValue(sample_size.sample_size, 0)->value;
 	result->is_percentage = sample_size.is_percentage;
 	if (sample_size.is_percentage) {
 		// sample size is given in sample_size: use system sampling
@@ -47,7 +47,7 @@ unique_ptr<SampleOptions> Transformer::TransformSampleOptions(duckdb_libpgquery:
 	if (sample_options.method) {
 		result->method = GetSampleMethod(sample_options.method);
 	}
-	result->seed = sample_options.seed;
+	result->seed = sample_options.seed == 0 ? -1 : sample_options.seed;
 	return result;
 }
 

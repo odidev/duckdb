@@ -6,7 +6,7 @@
 
 namespace duckdb {
 
-unique_ptr<ParsedExpression> Transformer::TransformInterval(duckdb_libpgquery::PGIntervalConstant *node) {
+unique_ptr<ParsedExpression> Transformer::TransformInterval(duckdb_libpgquery::PGIntervalConstant *node, idx_t depth) {
 	// handle post-fix notation of INTERVAL
 
 	// three scenarios
@@ -16,7 +16,7 @@ unique_ptr<ParsedExpression> Transformer::TransformInterval(duckdb_libpgquery::P
 	unique_ptr<ParsedExpression> expr;
 	switch (node->val_type) {
 	case duckdb_libpgquery::T_PGAExpr:
-		expr = TransformExpression(node->eval);
+		expr = TransformExpression(node->eval, depth + 1);
 		break;
 	case duckdb_libpgquery::T_PGString:
 		expr = make_unique<ConstantExpression>(Value(node->sval));
@@ -25,7 +25,7 @@ unique_ptr<ParsedExpression> Transformer::TransformInterval(duckdb_libpgquery::P
 		expr = make_unique<ConstantExpression>(Value(node->ival));
 		break;
 	default:
-		throw ParserException("Unsupported interval transformation");
+		throw InternalException("Unsupported interval transformation");
 	}
 
 	if (!node->typmods) {
@@ -106,14 +106,14 @@ unique_ptr<ParsedExpression> Transformer::TransformInterval(duckdb_libpgquery::P
 		fname = "to_microseconds";
 		target_type = LogicalType::BIGINT;
 	} else {
-		throw ParserException("Unsupported interval post-fix");
+		throw InternalException("Unsupported interval post-fix");
 	}
 	// first push a cast to the target type
 	expr = make_unique<CastExpression>(target_type, move(expr));
 	// now push the operation
 	vector<unique_ptr<ParsedExpression>> children;
 	children.push_back(move(expr));
-	return make_unique<FunctionExpression>(fname, children);
+	return make_unique<FunctionExpression>(fname, move(children));
 }
 
 } // namespace duckdb

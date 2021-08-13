@@ -23,6 +23,8 @@ static LogicalType ResolveInType(OperatorExpression &op, vector<BoundExpression 
 	for (idx_t i = 1; i < children.size(); i++) {
 		max_type = LogicalType::MaxLogicalType(max_type, children[i]->expr->return_type);
 	}
+	ExpressionBinder::ResolveParameterType(max_type);
+
 	// cast all children to the same type
 	for (idx_t i = 0; i < children.size(); i++) {
 		children[i]->expr = BoundCastExpression::AddCastToType(move(children[i]->expr), max_type);
@@ -36,6 +38,7 @@ static LogicalType ResolveOperatorType(OperatorExpression &op, vector<BoundExpre
 	case ExpressionType::OPERATOR_IS_NULL:
 	case ExpressionType::OPERATOR_IS_NOT_NULL:
 		// IS (NOT) NULL always returns a boolean, and does not cast its children
+		ExpressionBinder::ResolveParameterType(children[0]->expr);
 		return LogicalType::BOOLEAN;
 	case ExpressionType::COMPARE_IN:
 	case ExpressionType::COMPARE_NOT_IN:
@@ -59,20 +62,30 @@ BindResult ExpressionBinder::BindExpression(OperatorExpression &op, idx_t depth)
 	// all children bound successfully
 	string function_name;
 	switch (op.type) {
-	case ExpressionType::ARRAY_EXTRACT:
-		function_name = "array_extract";
+	case ExpressionType::ARRAY_EXTRACT: {
+		D_ASSERT(op.children[0]->expression_class == ExpressionClass::BOUND_EXPRESSION);
+		auto &b_exp = (BoundExpression &)*op.children[0];
+		if (b_exp.expr->return_type.id() == LogicalTypeId::MAP) {
+			function_name = "map_extract";
+		} else {
+			function_name = "array_extract";
+		}
 		break;
+	}
 	case ExpressionType::ARRAY_SLICE:
 		function_name = "array_slice";
 		break;
 	case ExpressionType::STRUCT_EXTRACT:
 		function_name = "struct_extract";
 		break;
+	case ExpressionType::ARRAY_CONSTRUCTOR:
+		function_name = "list_value";
+		break;
 	default:
 		break;
 	}
 	if (!function_name.empty()) {
-		auto function = make_unique<FunctionExpression>(function_name, op.children);
+		auto function = make_unique<FunctionExpression>(function_name, move(op.children));
 		return BindExpression(*function, depth, nullptr);
 	}
 

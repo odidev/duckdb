@@ -45,6 +45,8 @@ static void MarkJoinSwitch(Vector &left, Vector &right, idx_t lcount, idx_t rcou
 		return TemplatedMarkJoin<int32_t, OP>(left, right, lcount, rcount, found_match);
 	case PhysicalType::INT64:
 		return TemplatedMarkJoin<int64_t, OP>(left, right, lcount, rcount, found_match);
+	case PhysicalType::INT128:
+		return TemplatedMarkJoin<hugeint_t, OP>(left, right, lcount, rcount, found_match);
 	case PhysicalType::UINT8:
 		return TemplatedMarkJoin<uint8_t, OP>(left, right, lcount, rcount, found_match);
 	case PhysicalType::UINT16:
@@ -60,7 +62,7 @@ static void MarkJoinSwitch(Vector &left, Vector &right, idx_t lcount, idx_t rcou
 	case PhysicalType::VARCHAR:
 		return TemplatedMarkJoin<string_t, OP>(left, right, lcount, rcount, found_match);
 	default:
-		throw NotImplementedException("Unimplemented type for join!");
+		throw NotImplementedException("Unimplemented type for mark join!");
 	}
 }
 
@@ -86,7 +88,7 @@ static void MarkJoinComparisonSwitch(Vector &left, Vector &right, idx_t lcount, 
 }
 
 void NestedLoopJoinMark::Perform(DataChunk &left, ChunkCollection &right, bool found_match[],
-                                 vector<JoinCondition> &conditions) {
+                                 const vector<JoinCondition> &conditions) {
 	// initialize a new temporary selection vector for the left chunk
 	// loop over all chunks in the RHS
 	for (idx_t chunk_idx = 0; chunk_idx < right.ChunkCount(); chunk_idx++) {

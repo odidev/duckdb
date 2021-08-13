@@ -88,10 +88,13 @@ bool WriteAheadLog::Replay(DatabaseInstance &database, string &path) {
 				checkpoint_state.ReplayEntry(entry_type);
 			}
 		}
-	} catch (std::exception &ex) {
+	} catch (std::exception &ex) { // LCOV_EXCL_START
 		Printer::Print(StringUtil::Format("Exception in WAL playback during initial read: %s\n", ex.what()));
 		return false;
-	}
+	} catch (...) {
+		Printer::Print("Unknown Exception in WAL playback during initial read");
+		return false;
+	} // LCOV_EXCL_STOP
 	initial_reader.reset();
 	if (checkpoint_state.checkpoint_id != INVALID_BLOCK) {
 		// there is a checkpoint flag: check if we need to deserialize the WAL
@@ -130,12 +133,16 @@ bool WriteAheadLog::Replay(DatabaseInstance &database, string &path) {
 				state.ReplayEntry(entry_type);
 			}
 		}
-	} catch (std::exception &ex) {
+	} catch (std::exception &ex) { // LCOV_EXCL_START
 		// FIXME: this should report a proper warning in the connection
 		Printer::Print(StringUtil::Format("Exception in WAL playback: %s\n", ex.what()));
 		// exception thrown in WAL replay: rollback
 		con.Rollback();
-	}
+	} catch (...) {
+		Printer::Print("Unknown Exception in WAL playback: %s\n");
+		// exception thrown in WAL replay: rollback
+		con.Rollback();
+	} // LCOV_EXCL_STOP
 	return false;
 }
 
@@ -196,7 +203,7 @@ void ReplayState::ReplayEntry(WALType entry_type) {
 		ReplayCheckpoint();
 		break;
 	default:
-		throw Exception("Invalid WAL entry type!");
+		throw InternalException("Invalid WAL entry type!");
 	}
 }
 
@@ -396,7 +403,7 @@ void ReplayState::ReplayDelete() {
 		return;
 	}
 	if (!current_table) {
-		throw Exception("Corrupt WAL: delete without table");
+		throw InternalException("Corrupt WAL: delete without table");
 	}
 
 	D_ASSERT(chunk.ColumnCount() == 1 && chunk.data[0].GetType() == LOGICAL_ROW_TYPE);
@@ -412,20 +419,23 @@ void ReplayState::ReplayDelete() {
 }
 
 void ReplayState::ReplayUpdate() {
-	idx_t column_index = source.Read<column_t>();
-
+	vector<column_t> column_path;
+	auto column_index_count = source.Read<idx_t>();
+	column_path.reserve(column_index_count);
+	for (idx_t i = 0; i < column_index_count; i++) {
+		column_path.push_back(source.Read<column_t>());
+	}
 	DataChunk chunk;
 	chunk.Deserialize(source);
 	if (deserialize_only) {
 		return;
 	}
 	if (!current_table) {
-		throw Exception("Corrupt WAL: update without table");
+		throw InternalException("Corrupt WAL: update without table");
 	}
 
-	vector<column_t> column_ids {column_index};
-	if (column_index >= current_table->columns.size()) {
-		throw Exception("Corrupt WAL: column index for update out of bounds");
+	if (column_path[0] >= current_table->columns.size()) {
+		throw InternalException("Corrupt WAL: column index for update out of bounds");
 	}
 
 	// remove the row id vector from the chunk
@@ -433,7 +443,7 @@ void ReplayState::ReplayUpdate() {
 	chunk.data.pop_back();
 
 	// now perform the update
-	current_table->storage->Update(*current_table, context, row_ids, column_ids, chunk);
+	current_table->storage->UpdateColumn(*current_table, context, row_ids, column_path, chunk);
 }
 
 void ReplayState::ReplayCheckpoint() {

@@ -11,30 +11,47 @@ setClass("duckdb_result",
   slots = list(
     connection = "duckdb_connection",
     stmt_lst = "list",
-    env = "environment"
+    env = "environment",
+    arrow = "logical",
+    query_result = "externalptr"
   )
 )
 
-duckdb_result <- function(connection, stmt_lst) {
+duckdb_result <- function(connection, stmt_lst, arrow) {
   env <- new.env(parent = emptyenv())
   env$rows_fetched <- 0
   env$open <- TRUE
   env$rows_affected <- 0
 
-  res <- new("duckdb_result", connection = connection, stmt_lst = stmt_lst, env = env)
+  res <- new("duckdb_result", connection = connection, stmt_lst = stmt_lst, env = env, arrow=arrow)
 
   if (stmt_lst$n_param == 0) {
-    duckdb_execute(res)
+    if (arrow){
+      query_result <- duckdb_execute(res)
+      new_res <- new("duckdb_result", connection = connection, stmt_lst = stmt_lst, env = env, arrow=arrow, query_result=query_result)
+      return (new_res)
+    }
+    else{
+      duckdb_execute(res)
+    }
+
   }
+
 
   return(res)
 }
 
 duckdb_execute <- function(res) {
-  res@env$resultset <- .Call(duckdb_execute_R, res@stmt_lst$ref)
-  attr(res@env$resultset, "row.names") <-
-    c(NA_integer_, as.integer(-1 * length(res@env$resultset[[1]])))
-  class(res@env$resultset) <- "data.frame"
+  if (res@arrow){
+    query <- .Call(duckdb_execute_R, res@stmt_lst$ref, res@arrow)
+    return (query)
+  }
+  res@env$resultset <- .Call(duckdb_execute_R, res@stmt_lst$ref, res@arrow)
+  if (!res@arrow) {
+      attr(res@env$resultset, "row.names") <-
+        c(NA_integer_, as.integer(-1 * length(res@env$resultset[[1]])))
+      class(res@env$resultset) <- "data.frame"
+  }
   if (res@stmt_lst$type != "SELECT") {
     res@env$rows_affected <- as.numeric(res@env$resultset[[1]][1])
   }
@@ -76,6 +93,29 @@ fix_rownames <- function(df) {
   return(df)
 }
 
+#' @rdname duckdb_result-class
+#' @param res Query result to be converted to an Arrow Table
+#' @param stream If we are streaming the query result or returning it all at once
+#' @param vector_per_chunk If streaming, how many vectors per chunk we should emit
+#' @param return_table If we return results as a list of RecordBatches or an Arrow Table
+#' @export
+duckdb_fetch_arrow <- function(res,stream=FALSE,vector_per_chunk=1,return_table=FALSE) {
+  if (vector_per_chunk < 0) {
+      stop("cannot fetch negative vector_per_chunk")
+  }
+  result <- .Call(duckdb_fetch_arrow_R, res@query_result,stream,vector_per_chunk,return_table)
+  return (result)
+}
+
+#' @rdname duckdb_result-class
+#' @param res Query result to be converted to an Arrow Table
+#' @export
+duckdb_fetch_record_batch <- function(res) {
+  result <- .Call(duckdb_fetch_record_batch_R, res@query_result)
+  return (result)
+}
+
+
 
 #' @rdname duckdb_result-class
 #' @inheritParams DBI::dbFetch
@@ -102,6 +142,10 @@ setMethod(
     if (res@stmt_lst$type != "SELECT") {
       warning("Should not call dbFetch() on results that do not come from SELECT")
       return(data.frame())
+    }
+
+    if (res@arrow) {
+        stop("Cannot dbFetch() an Arrow result")
     }
 
     timezone_out <- res@connection@timezone_out
@@ -198,8 +242,10 @@ setMethod(
 setMethod(
   "dbColumnInfo", "duckdb_result",
   function(res, ...) {
+    if (!res@env$open) {
+      stop("result has already been cleared")
+    }
     return(data.frame(name = res@stmt_lst$names, type = res@stmt_lst$rtypes, stringsAsFactors = FALSE))
-
   }
 )
 

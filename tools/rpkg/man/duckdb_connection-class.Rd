@@ -9,6 +9,7 @@
 \alias{dbSendQuery,duckdb_connection,character-method}
 \alias{dbDataType,duckdb_connection-method}
 \alias{dbWriteTable,duckdb_connection,character,data.frame-method}
+\alias{dbAppendTable,duckdb_connection-method}
 \alias{dbListTables,duckdb_connection-method}
 \alias{dbExistsTable,duckdb_connection,character-method}
 \alias{dbListFields,duckdb_connection,character-method}
@@ -23,7 +24,7 @@
 
 \S4method{dbIsValid}{duckdb_connection}(dbObj, ...)
 
-\S4method{dbSendQuery}{duckdb_connection,character}(conn, statement, params = NULL, ...)
+\S4method{dbSendQuery}{duckdb_connection,character}(conn, statement, params = NULL, ..., arrow = FALSE)
 
 \S4method{dbDataType}{duckdb_connection}(dbObj, obj, ...)
 
@@ -39,13 +40,15 @@
   ...
 )
 
+\S4method{dbAppendTable}{duckdb_connection}(conn, name, value, ..., row.names = NULL)
+
 \S4method{dbListTables}{duckdb_connection}(conn, ...)
 
 \S4method{dbExistsTable}{duckdb_connection,character}(conn, name, ...)
 
 \S4method{dbListFields}{duckdb_connection,character}(conn, name, ...)
 
-\S4method{dbRemoveTable}{duckdb_connection,character}(conn, name, ...)
+\S4method{dbRemoveTable}{duckdb_connection,character}(conn, name, ..., fail_if_missing = TRUE)
 
 \S4method{dbGetInfo}{duckdb_connection}(dbObj, ...)
 
@@ -70,6 +73,8 @@ or a \linkS4class{DBIResult}}
 \item{statement}{a character string containing SQL.}
 
 \item{params}{A list of bindings, named or unnamed.}
+
+\item{arrow}{Whether the query should be returned as an Arrow Table}
 
 \item{obj}{An R object whose SQL type we want to determine.}
 

@@ -57,7 +57,7 @@ struct ApproxQuantileOperation {
 	}
 
 	template <class STATE, class OP>
-	static void Combine(STATE source, STATE *target) {
+	static void Combine(const STATE &source, STATE *target) {
 		if (source.pos == 0) {
 			return;
 		}
@@ -112,18 +112,13 @@ AggregateFunction GetApproximateQuantileAggregateFunction(PhysicalType type) {
 		return AggregateFunction::UnaryAggregateDestructor<ApproxQuantileState, int64_t, int64_t,
 		                                                   ApproxQuantileOperation<int64_t>>(LogicalType::BIGINT,
 		                                                                                     LogicalType::BIGINT);
-	case PhysicalType::FLOAT:
-		return AggregateFunction::UnaryAggregateDestructor<ApproxQuantileState, float, float,
-		                                                   ApproxQuantileOperation<float>>(LogicalType::FLOAT,
-		                                                                                   LogicalType::FLOAT);
-
 	case PhysicalType::DOUBLE:
 		return AggregateFunction::UnaryAggregateDestructor<ApproxQuantileState, double, double,
 		                                                   ApproxQuantileOperation<double>>(LogicalType::DOUBLE,
 		                                                                                    LogicalType::DOUBLE);
 
 	default:
-		throw NotImplementedException("Unimplemented quantile aggregate");
+		throw InternalException("Unimplemented quantile aggregate");
 	}
 }
 
@@ -161,7 +156,7 @@ AggregateFunction GetApproximateQuantileAggregate(PhysicalType type) {
 
 void ApproximateQuantileFun::RegisterFunction(BuiltinFunctions &set) {
 	AggregateFunctionSet approx_quantile("approx_quantile");
-	approx_quantile.AddFunction(AggregateFunction({LogicalType::DECIMAL, LogicalType::FLOAT}, LogicalType::DECIMAL,
+	approx_quantile.AddFunction(AggregateFunction({LogicalTypeId::DECIMAL, LogicalType::FLOAT}, LogicalTypeId::DECIMAL,
 	                                              nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 	                                              BindApproxQuantileDecimal));
 

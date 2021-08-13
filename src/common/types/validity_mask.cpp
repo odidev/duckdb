@@ -2,20 +2,10 @@
 
 namespace duckdb {
 
-ValidityData::ValidityData(idx_t count) {
-	auto entry_count = EntryCount(count);
-	owned_data = unique_ptr<validity_t[]>(new validity_t[entry_count]);
-	for (idx_t entry_idx = 0; entry_idx < entry_count; entry_idx++) {
-		owned_data[entry_idx] = MAX_ENTRY;
-	}
+ValidityData::ValidityData(idx_t count) : TemplatedValidityData(count) {
 }
-ValidityData::ValidityData(const ValidityMask &original, idx_t count) {
-	D_ASSERT(original.validity_mask);
-	auto entry_count = EntryCount(count);
-	owned_data = unique_ptr<validity_t[]>(new validity_t[entry_count]);
-	for (idx_t entry_idx = 0; entry_idx < entry_count; entry_idx++) {
-		owned_data[entry_idx] = original.validity_mask[entry_idx];
-	}
+ValidityData::ValidityData(const ValidityMask &original, idx_t count)
+    : TemplatedValidityData(original.GetData(), count) {
 }
 
 void ValidityMask::Combine(const ValidityMask &other, idx_t count) {
@@ -47,6 +37,7 @@ void ValidityMask::Combine(const ValidityMask &other, idx_t count) {
 	}
 }
 
+// LCOV_EXCL_START
 string ValidityMask::ToString(idx_t count) const {
 	string result = "Validity Mask (" + to_string(count) + ") [";
 	for (idx_t i = 0; i < count; i++) {
@@ -55,13 +46,7 @@ string ValidityMask::ToString(idx_t count) const {
 	result += "]";
 	return result;
 }
-
-bool ValidityMask::IsMaskSet() const {
-	if (validity_mask) {
-		return true;
-	}
-	return false;
-}
+// LCOV_EXCL_STOP
 
 void ValidityMask::Resize(idx_t old_size, idx_t new_size) {
 	if (validity_mask) {
@@ -93,9 +78,15 @@ void ValidityMask::Slice(const ValidityMask &other, idx_t offset) {
 	}
 	Initialize(STANDARD_VECTOR_SIZE);
 
+// FIXME THIS NEEDS FIXING!
+#if 1
+	for (idx_t i = offset; i < STANDARD_VECTOR_SIZE; i++) {
+		Set(i - offset, other.RowIsValid(i));
+	}
+#else
 	// first shift the "whole" units
 	idx_t entire_units = offset / BITS_PER_VALUE;
-	idx_t sub_units = offset - entire_units % BITS_PER_VALUE;
+	idx_t sub_units = offset - entire_units * BITS_PER_VALUE;
 	if (entire_units > 0) {
 		idx_t validity_idx;
 		for (validity_idx = 0; validity_idx + entire_units < STANDARD_ENTRY_COUNT; validity_idx++) {
@@ -119,6 +110,12 @@ void ValidityMask::Slice(const ValidityMask &other, idx_t offset) {
 		}
 		validity_mask[validity_idx] >>= sub_units;
 	}
+#ifdef DEBUG
+	for (idx_t i = offset; i < STANDARD_VECTOR_SIZE; i++) {
+		D_ASSERT(RowIsValid(i - offset) == other.RowIsValid(i));
+	}
+#endif
+#endif
 }
 
 } // namespace duckdb

@@ -14,6 +14,8 @@
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 
+#include <limits>
+
 namespace duckdb {
 
 template <class OP>
@@ -162,6 +164,9 @@ unique_ptr<FunctionData> BindDecimalAddSubtract(ClientContext &context, ScalarFu
 	// get the max width and scale of the input arguments
 	uint8_t max_width = 0, max_scale = 0, max_width_over_scale = 0;
 	for (idx_t i = 0; i < arguments.size(); i++) {
+		if (arguments[i]->return_type.id() == LogicalTypeId::UNKNOWN) {
+			continue;
+		}
 		uint8_t width, scale;
 		auto can_convert = arguments[i]->return_type.GetDecimalProperties(width, scale);
 		if (!can_convert) {
@@ -171,6 +176,7 @@ unique_ptr<FunctionData> BindDecimalAddSubtract(ClientContext &context, ScalarFu
 		max_scale = MaxValue<uint8_t>(scale, max_scale);
 		max_width_over_scale = MaxValue<uint8_t>(width - scale, max_width_over_scale);
 	}
+	D_ASSERT(max_width > 0);
 	// for addition/subtraction, we add 1 to the width to ensure we don't overflow
 	bool check_overflow = false;
 	auto required_width = MaxValue<uint8_t>(max_scale + max_width_over_scale, max_width) + 1;
@@ -185,14 +191,15 @@ unique_ptr<FunctionData> BindDecimalAddSubtract(ClientContext &context, ScalarFu
 		required_width = Decimal::MAX_WIDTH_DECIMAL;
 	}
 	// arithmetic between two decimal arguments: check the types of the input arguments
-	LogicalType result_type = LogicalType(LogicalTypeId::DECIMAL, required_width, max_scale);
+	LogicalType result_type = LogicalType::DECIMAL(required_width, max_scale);
 	// we cast all input types to the specified type
 	for (idx_t i = 0; i < arguments.size(); i++) {
 		// first check if the cast is necessary
 		// if the argument has a matching scale and internal type as the output type, no casting is necessary
 		auto &argument_type = arguments[i]->return_type;
-		if (argument_type.scale() == result_type.scale() &&
-		    argument_type.InternalType() == result_type.InternalType()) {
+		uint8_t width, scale;
+		argument_type.GetDecimalProperties(width, scale);
+		if (scale == DecimalType::GetScale(result_type) && argument_type.InternalType() == result_type.InternalType()) {
 			bound_function.arguments[i] = argument_type;
 		} else {
 			bound_function.arguments[i] = result_type;
@@ -241,9 +248,9 @@ void AddFun::RegisterFunction(BuiltinFunctions &set) {
 	}
 	// we can add integers to dates
 	functions.AddFunction(ScalarFunction({LogicalType::DATE, LogicalType::INTEGER}, LogicalType::DATE,
-	                                     GetScalarBinaryFunction<AddOperator>(PhysicalType::INT32)));
+	                                     ScalarFunction::BinaryFunction<date_t, int32_t, date_t, AddOperator>));
 	functions.AddFunction(ScalarFunction({LogicalType::INTEGER, LogicalType::DATE}, LogicalType::DATE,
-	                                     GetScalarBinaryFunction<AddOperator>(PhysicalType::INT32)));
+	                                     ScalarFunction::BinaryFunction<int32_t, date_t, date_t, AddOperator>));
 	// we can add intervals together
 	functions.AddFunction(
 	    ScalarFunction({LogicalType::INTERVAL, LogicalType::INTERVAL}, LogicalType::INTERVAL,
@@ -281,17 +288,39 @@ void AddFun::RegisterFunction(BuiltinFunctions &set) {
 //===--------------------------------------------------------------------===//
 // - [subtract]
 //===--------------------------------------------------------------------===//
+struct NegateOperator {
+	template <class TA, class TR>
+	static inline TR Operation(TA input) {
+		using Limits = std::numeric_limits<TR>;
+		auto cast = (TR)input;
+		if (Limits::is_integer && Limits::is_signed && Limits::lowest() == cast) {
+			throw OutOfRangeException("Overflow in negation of integer!");
+		}
+		return -cast;
+	}
+};
+
+template <>
+interval_t NegateOperator::Operation(interval_t input) {
+	interval_t result;
+	result.months = NegateOperator::Operation<int32_t, int32_t>(input.months);
+	result.days = NegateOperator::Operation<int32_t, int32_t>(input.days);
+	result.micros = NegateOperator::Operation<int64_t, int64_t>(input.micros);
+	return result;
+}
+
 unique_ptr<FunctionData> DecimalNegateBind(ClientContext &context, ScalarFunction &bound_function,
                                            vector<unique_ptr<Expression>> &arguments) {
-	auto decimal_type = arguments[0]->return_type;
-	if (decimal_type.width() <= Decimal::MAX_WIDTH_INT16) {
+	auto &decimal_type = arguments[0]->return_type;
+	auto width = DecimalType::GetWidth(decimal_type);
+	if (width <= Decimal::MAX_WIDTH_INT16) {
 		bound_function.function = ScalarFunction::GetScalarUnaryFunction<NegateOperator>(LogicalTypeId::SMALLINT);
-	} else if (decimal_type.width() <= Decimal::MAX_WIDTH_INT32) {
+	} else if (width <= Decimal::MAX_WIDTH_INT32) {
 		bound_function.function = ScalarFunction::GetScalarUnaryFunction<NegateOperator>(LogicalTypeId::INTEGER);
-	} else if (decimal_type.width() <= Decimal::MAX_WIDTH_INT64) {
+	} else if (width <= Decimal::MAX_WIDTH_INT64) {
 		bound_function.function = ScalarFunction::GetScalarUnaryFunction<NegateOperator>(LogicalTypeId::BIGINT);
 	} else {
-		D_ASSERT(decimal_type.width() <= Decimal::MAX_WIDTH_INT128);
+		D_ASSERT(width <= Decimal::MAX_WIDTH_INT128);
 		bound_function.function = ScalarFunction::GetScalarUnaryFunction<NegateOperator>(LogicalTypeId::HUGEINT);
 	}
 	decimal_type.Verify();
@@ -364,10 +393,10 @@ void SubtractFun::RegisterFunction(BuiltinFunctions &set) {
 		}
 	}
 	// we can subtract dates from each other
-	functions.AddFunction(ScalarFunction({LogicalType::DATE, LogicalType::DATE}, LogicalType::INTEGER,
-	                                     GetScalarBinaryFunction<SubtractOperator>(PhysicalType::INT32)));
+	functions.AddFunction(ScalarFunction({LogicalType::DATE, LogicalType::DATE}, LogicalType::BIGINT,
+	                                     ScalarFunction::BinaryFunction<date_t, date_t, int64_t, SubtractOperator>));
 	functions.AddFunction(ScalarFunction({LogicalType::DATE, LogicalType::INTEGER}, LogicalType::DATE,
-	                                     GetScalarBinaryFunction<SubtractOperator>(PhysicalType::INT32)));
+	                                     ScalarFunction::BinaryFunction<date_t, int32_t, date_t, SubtractOperator>));
 	// we can subtract timestamps from each other
 	functions.AddFunction(
 	    ScalarFunction({LogicalType::TIMESTAMP, LogicalType::TIMESTAMP}, LogicalType::INTERVAL,
@@ -397,6 +426,8 @@ void SubtractFun::RegisterFunction(BuiltinFunctions &set) {
 			                                     nullptr, nullptr, NegateBindStatistics));
 		}
 	}
+	functions.AddFunction(ScalarFunction({LogicalType::INTERVAL}, LogicalType::INTERVAL,
+	                                     ScalarFunction::UnaryFunction<interval_t, interval_t, NegateOperator>));
 	set.AddFunction(functions);
 }
 
@@ -445,6 +476,9 @@ unique_ptr<FunctionData> BindDecimalMultiply(ClientContext &context, ScalarFunct
 	uint8_t result_width = 0, result_scale = 0;
 	uint8_t max_width = 0;
 	for (idx_t i = 0; i < arguments.size(); i++) {
+		if (arguments[i]->return_type.id() == LogicalTypeId::UNKNOWN) {
+			continue;
+		}
 		uint8_t width, scale;
 		auto can_convert = arguments[i]->return_type.GetDecimalProperties(width, scale);
 		if (!can_convert) {
@@ -456,6 +490,7 @@ unique_ptr<FunctionData> BindDecimalMultiply(ClientContext &context, ScalarFunct
 		result_width += width;
 		result_scale += scale;
 	}
+	D_ASSERT(max_width > 0);
 	if (result_scale > Decimal::MAX_WIDTH_DECIMAL) {
 		throw OutOfRangeException(
 		    "Needed scale %d to accurately represent the multiplication result, but this is out of range of the "
@@ -473,7 +508,7 @@ unique_ptr<FunctionData> BindDecimalMultiply(ClientContext &context, ScalarFunct
 		check_overflow = true;
 		result_width = Decimal::MAX_WIDTH_DECIMAL;
 	}
-	LogicalType result_type = LogicalType(LogicalTypeId::DECIMAL, result_width, result_scale);
+	LogicalType result_type = LogicalType::DECIMAL(result_width, result_scale);
 	// since our scale is the summation of our input scales, we do not need to cast to the result scale
 	// however, we might need to cast to the correct internal type
 	for (idx_t i = 0; i < arguments.size(); i++) {
@@ -481,7 +516,12 @@ unique_ptr<FunctionData> BindDecimalMultiply(ClientContext &context, ScalarFunct
 		if (argument_type.InternalType() == result_type.InternalType()) {
 			bound_function.arguments[i] = argument_type;
 		} else {
-			bound_function.arguments[i] = LogicalType(LogicalTypeId::DECIMAL, result_width, argument_type.scale());
+			uint8_t width, scale;
+			if (!argument_type.GetDecimalProperties(width, scale)) {
+				scale = 0;
+			}
+
+			bound_function.arguments[i] = LogicalType::DECIMAL(result_width, scale);
 		}
 	}
 	result_type.Verify();

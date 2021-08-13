@@ -6,19 +6,19 @@
 
 namespace duckdb {
 
-unique_ptr<ParsedExpression> Transformer::TransformArrayAccess(duckdb_libpgquery::PGAIndirection *indirection_node) {
+unique_ptr<ParsedExpression> Transformer::TransformArrayAccess(duckdb_libpgquery::PGAIndirection *indirection_node,
+                                                               idx_t depth) {
 	// transform the source expression
 	unique_ptr<ParsedExpression> result;
-	result = TransformExpression(indirection_node->arg);
+	result = TransformExpression(indirection_node->arg, depth + 1);
 
 	// now go over the indices
 	// note that a single indirection node can contain multiple indices
 	// this happens for e.g. more complex accesses (e.g. (foo).field1[42])
 	for (auto node = indirection_node->indirection->head; node != nullptr; node = node->next) {
 		auto target = reinterpret_cast<duckdb_libpgquery::PGNode *>(node->data.ptr_value);
-		if (!target) {
-			break;
-		}
+		D_ASSERT(target);
+
 		switch (target->type) {
 		case duckdb_libpgquery::T_PGAIndices: {
 			// index access (either slice or extract)
@@ -28,15 +28,15 @@ unique_ptr<ParsedExpression> Transformer::TransformArrayAccess(duckdb_libpgquery
 			if (index->is_slice) {
 				// slice
 				children.push_back(!index->lidx ? make_unique<ConstantExpression>(Value())
-				                                : TransformExpression(index->lidx));
+				                                : TransformExpression(index->lidx, depth + 1));
 				children.push_back(!index->uidx ? make_unique<ConstantExpression>(Value())
-				                                : TransformExpression(index->uidx));
+				                                : TransformExpression(index->uidx, depth + 1));
 				result = make_unique<OperatorExpression>(ExpressionType::ARRAY_SLICE, move(children));
 			} else {
 				// array access
 				D_ASSERT(!index->lidx);
 				D_ASSERT(index->uidx);
-				children.push_back(TransformExpression(index->uidx));
+				children.push_back(TransformExpression(index->uidx, depth + 1));
 				result = make_unique<OperatorExpression>(ExpressionType::ARRAY_EXTRACT, move(children));
 			}
 			break;
@@ -45,11 +45,10 @@ unique_ptr<ParsedExpression> Transformer::TransformArrayAccess(duckdb_libpgquery
 			auto val = (duckdb_libpgquery::PGValue *)target;
 			vector<unique_ptr<ParsedExpression>> children;
 			children.push_back(move(result));
-			children.push_back(TransformValue(*val));
+			children.push_back(TransformValue(*val, depth + 1));
 			result = make_unique<OperatorExpression>(ExpressionType::STRUCT_EXTRACT, move(children));
 			break;
 		}
-		case duckdb_libpgquery::T_PGAStar:
 		default:
 			throw NotImplementedException("Unimplemented subscript type");
 		}

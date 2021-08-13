@@ -36,9 +36,10 @@ static scalar_function_t GetScalarIntegerUnaryFunctionFixedReturn(const LogicalT
 	return function;
 }
 
+template <class OP>
 struct UnaryDoubleWrapper {
-	template <class FUNC, class OP, class INPUT_TYPE, class RESULT_TYPE>
-	static inline RESULT_TYPE Operation(FUNC fun, INPUT_TYPE input, ValidityMask &mask, idx_t idx) {
+	template <class INPUT_TYPE, class RESULT_TYPE>
+	static RESULT_TYPE Operation(INPUT_TYPE input, ValidityMask &mask, idx_t idx, void *dataptr) {
 		RESULT_TYPE result = OP::template Operation<INPUT_TYPE, RESULT_TYPE>(input);
 		if (std::isnan(result) || std::isinf(result) || errno != 0) {
 			errno = 0;
@@ -47,17 +48,13 @@ struct UnaryDoubleWrapper {
 		}
 		return result;
 	}
-
-	static bool AddsNulls() {
-		return true;
-	}
 };
 
 template <class T, class OP>
 static void UnaryDoubleFunctionWrapper(DataChunk &input, ExpressionState &state, Vector &result) {
 	D_ASSERT(input.ColumnCount() >= 1);
 	errno = 0;
-	UnaryExecutor::Execute<T, T, OP, UnaryDoubleWrapper>(input.data[0], result, input.size());
+	UnaryExecutor::GenericExecute<T, T, UnaryDoubleWrapper<OP>>(input.data[0], result, input.size(), nullptr, true);
 }
 
 struct BinaryDoubleWrapper {
@@ -82,6 +79,46 @@ static void BinaryDoubleFunctionWrapper(DataChunk &input, ExpressionState &state
 	D_ASSERT(input.ColumnCount() >= 2);
 	errno = 0;
 	BinaryExecutor::Execute<T, T, T, OP, BinaryDoubleWrapper>(input.data[0], input.data[1], result, input.size());
+}
+
+//===--------------------------------------------------------------------===//
+// nextafter
+//===--------------------------------------------------------------------===//
+
+struct NextAfterOperator {
+	template <class TA, class TB, class TR>
+	static inline TR Operation(TA base, TB exponent) {
+		throw NotImplementedException("Unimplemented type for NextAfter Function");
+	}
+
+	template <class TA, class TB, class TR>
+	static inline double Operation(double input, double approximate_to) {
+		return nextafter(input, approximate_to);
+	}
+	template <class TA, class TB, class TR>
+	static inline float Operation(float input, float approximate_to) {
+		return nextafterf(input, approximate_to);
+	}
+};
+
+unique_ptr<FunctionData> BindNextAfter(ClientContext &context, ScalarFunction &function,
+                                       vector<unique_ptr<Expression>> &arguments) {
+	if ((arguments[0]->return_type != arguments[1]->return_type) ||
+	    (arguments[0]->return_type != LogicalType::FLOAT && arguments[0]->return_type != LogicalType::DOUBLE)) {
+		throw NotImplementedException("Unimplemented type for NextAfter Function");
+	}
+	return nullptr;
+}
+
+void NextAfterFun::RegisterFunction(BuiltinFunctions &set) {
+	ScalarFunctionSet next_after_fun("nextafter");
+	next_after_fun.AddFunction(
+	    ScalarFunction("nextafter", {LogicalType::DOUBLE, LogicalType::DOUBLE}, LogicalType::DOUBLE,
+	                   BinaryDoubleFunctionWrapper<double, NextAfterOperator>, false, BindNextAfter));
+	next_after_fun.AddFunction(ScalarFunction("nextafter", {LogicalType::FLOAT, LogicalType::FLOAT}, LogicalType::FLOAT,
+	                                          BinaryDoubleFunctionWrapper<float, NextAfterOperator>, false,
+	                                          BindNextAfter));
+	set.AddFunction(next_after_fun);
 }
 
 //===--------------------------------------------------------------------===//
@@ -202,15 +239,17 @@ struct CeilOperator {
 template <class T, class POWERS_OF_TEN, class OP>
 static void GenericRoundFunctionDecimal(DataChunk &input, ExpressionState &state, Vector &result) {
 	auto &func_expr = (BoundFunctionExpression &)state.expr;
-	OP::template Operation<T, POWERS_OF_TEN>(input, func_expr.children[0]->return_type.scale(), result);
+	OP::template Operation<T, POWERS_OF_TEN>(input, DecimalType::GetScale(func_expr.children[0]->return_type), result);
 }
 
 template <class OP>
 unique_ptr<FunctionData> BindGenericRoundFunctionDecimal(ClientContext &context, ScalarFunction &bound_function,
                                                          vector<unique_ptr<Expression>> &arguments) {
 	// ceil essentially removes the scale
-	auto decimal_type = arguments[0]->return_type;
-	if (decimal_type.scale() == 0) {
+	auto &decimal_type = arguments[0]->return_type;
+	auto scale = DecimalType::GetScale(decimal_type);
+	auto width = DecimalType::GetWidth(decimal_type);
+	if (scale == 0) {
 		bound_function.function = ScalarFunction::NopFunction;
 	} else {
 		switch (decimal_type.InternalType()) {
@@ -229,7 +268,7 @@ unique_ptr<FunctionData> BindGenericRoundFunctionDecimal(ClientContext &context,
 		}
 	}
 	bound_function.arguments[0] = decimal_type;
-	bound_function.return_type = LogicalType(LogicalTypeId::DECIMAL, decimal_type.width(), 0);
+	bound_function.return_type = LogicalType::DECIMAL(width, 0);
 	return nullptr;
 }
 
@@ -269,7 +308,7 @@ void CeilFun::RegisterFunction(BuiltinFunctions &set) {
 			bind_func = BindGenericRoundFunctionDecimal<CeilDecimalOperator>;
 			break;
 		default:
-			throw NotImplementedException("Unimplemented numeric type for function \"ceil\"");
+			throw InternalException("Unimplemented numeric type for function \"ceil\"");
 		}
 		ceil.AddFunction(ScalarFunction({type}, type, func, false, bind_func));
 	}
@@ -325,7 +364,7 @@ void FloorFun::RegisterFunction(BuiltinFunctions &set) {
 			bind_func = BindGenericRoundFunctionDecimal<FloorDecimalOperator>;
 			break;
 		default:
-			throw NotImplementedException("Unimplemented numeric type for function \"floor\"");
+			throw InternalException("Unimplemented numeric type for function \"floor\"");
 		}
 		floor.AddFunction(ScalarFunction({type}, type, func, false, bind_func));
 	}
@@ -405,8 +444,9 @@ template <class T, class POWERS_OF_TEN_CLASS>
 static void DecimalRoundNegativePrecisionFunction(DataChunk &input, ExpressionState &state, Vector &result) {
 	auto &func_expr = (BoundFunctionExpression &)state.expr;
 	auto &info = (RoundPrecisionFunctionData &)*func_expr.bind_info;
-	auto source_scale = func_expr.children[0]->return_type.scale();
-	if (-info.target_scale >= func_expr.children[0]->return_type.width()) {
+	auto source_scale = DecimalType::GetScale(func_expr.children[0]->return_type);
+	auto width = DecimalType::GetWidth(func_expr.children[0]->return_type);
+	if (-info.target_scale >= width) {
 		// scale too big for width
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
 		result.SetValue(0, Value::INTEGER(0));
@@ -415,6 +455,7 @@ static void DecimalRoundNegativePrecisionFunction(DataChunk &input, ExpressionSt
 	T divide_power_of_ten = POWERS_OF_TEN_CLASS::POWERS_OF_TEN[-info.target_scale + source_scale];
 	T multiply_power_of_ten = POWERS_OF_TEN_CLASS::POWERS_OF_TEN[-info.target_scale];
 	T addition = divide_power_of_ten / 2;
+
 	UnaryExecutor::Execute<T, T>(input.data[0], result, input.size(), [&](T input) {
 		if (input < 0) {
 			input -= addition;
@@ -429,7 +470,7 @@ template <class T, class POWERS_OF_TEN_CLASS>
 static void DecimalRoundPositivePrecisionFunction(DataChunk &input, ExpressionState &state, Vector &result) {
 	auto &func_expr = (BoundFunctionExpression &)state.expr;
 	auto &info = (RoundPrecisionFunctionData &)*func_expr.bind_info;
-	auto source_scale = func_expr.children[0]->return_type.scale();
+	auto source_scale = DecimalType::GetScale(func_expr.children[0]->return_type);
 	T power_of_ten = POWERS_OF_TEN_CLASS::POWERS_OF_TEN[source_scale - info.target_scale];
 	T addition = power_of_ten / 2;
 	UnaryExecutor::Execute<T, T>(input.data[0], result, input.size(), [&](T input) {
@@ -444,7 +485,7 @@ static void DecimalRoundPositivePrecisionFunction(DataChunk &input, ExpressionSt
 
 unique_ptr<FunctionData> BindDecimalRoundPrecision(ClientContext &context, ScalarFunction &bound_function,
                                                    vector<unique_ptr<Expression>> &arguments) {
-	auto decimal_type = arguments[0]->return_type;
+	auto &decimal_type = arguments[0]->return_type;
 	if (!arguments[1]->IsFoldable()) {
 		throw NotImplementedException("ROUND(DECIMAL, INTEGER) with non-constant precision is not supported");
 	}
@@ -459,6 +500,8 @@ unique_ptr<FunctionData> BindDecimalRoundPrecision(ClientContext &context, Scala
 	// i.e. ROUND(DECIMAL(18,3), -1) -> DECIMAL(18,0)
 	int32_t round_value = val.value_.integer;
 	uint8_t target_scale;
+	auto width = DecimalType::GetWidth(decimal_type);
+	auto scale = DecimalType::GetScale(decimal_type);
 	if (round_value < 0) {
 		target_scale = 0;
 		switch (decimal_type.InternalType()) {
@@ -476,10 +519,10 @@ unique_ptr<FunctionData> BindDecimalRoundPrecision(ClientContext &context, Scala
 			break;
 		}
 	} else {
-		if (round_value >= (int32_t)decimal_type.scale()) {
+		if (round_value >= (int32_t)scale) {
 			// if round_value is bigger than or equal to scale we do nothing
 			bound_function.function = ScalarFunction::NopFunction;
-			target_scale = decimal_type.scale();
+			target_scale = scale;
 		} else {
 			target_scale = round_value;
 			switch (decimal_type.InternalType()) {
@@ -499,7 +542,7 @@ unique_ptr<FunctionData> BindDecimalRoundPrecision(ClientContext &context, Scala
 		}
 	}
 	bound_function.arguments[0] = decimal_type;
-	bound_function.return_type = LogicalType(LogicalTypeId::DECIMAL, decimal_type.width(), target_scale);
+	bound_function.return_type = LogicalType::DECIMAL(width, target_scale);
 	return make_unique<RoundPrecisionFunctionData>(round_value);
 }
 
@@ -528,7 +571,7 @@ void RoundFun::RegisterFunction(BuiltinFunctions &set) {
 			bind_prec_func = BindDecimalRoundPrecision;
 			break;
 		default:
-			throw NotImplementedException("Unimplemented numeric type for function \"floor\"");
+			throw InternalException("Unimplemented numeric type for function \"floor\"");
 		}
 		round.AddFunction(ScalarFunction({type}, type, round_func, false, bind_func));
 		round.AddFunction(ScalarFunction({type, LogicalType::INTEGER}, type, round_prec_func, false, bind_prec_func));

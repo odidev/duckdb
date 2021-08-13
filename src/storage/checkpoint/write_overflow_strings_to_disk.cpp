@@ -1,4 +1,6 @@
 #include "duckdb/storage/checkpoint/write_overflow_strings_to_disk.hpp"
+#include "duckdb/storage/block_manager.hpp"
+#include "duckdb/storage/buffer_manager.hpp"
 
 namespace duckdb {
 
@@ -17,7 +19,7 @@ void WriteOverflowStringsToDisk::WriteString(string_t string, block_id_t &result
 	auto &buffer_manager = BufferManager::GetBufferManager(db);
 	auto &block_manager = BlockManager::GetBlockManager(db);
 	if (!handle) {
-		handle = buffer_manager.Allocate(Storage::BLOCK_ALLOC_SIZE);
+		handle = buffer_manager.Allocate(Storage::BLOCK_SIZE);
 	}
 	// first write the length of the string
 	if (block_id == INVALID_BLOCK || offset + sizeof(uint32_t) >= STRING_SPACE) {

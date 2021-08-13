@@ -8,6 +8,10 @@ void BuiltinFunctions::RegisterNestedFunctions() {
 	Register<StructExtractFun>();
 	Register<ListValueFun>();
 	Register<ListExtractFun>();
+	Register<ListRangeFun>();
+	Register<MapFun>();
+	Register<MapExtractFun>();
+	Register<CardinalityFun>();
 }
 
 } // namespace duckdb

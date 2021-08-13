@@ -22,9 +22,11 @@
 
 namespace duckdb {
 
+class ChunkCollection;
 class ClientContext;
 class DatabaseInstance;
 class DuckDB;
+class LogicalOperator;
 
 typedef void (*warning_callback)(std::string);
 
@@ -88,9 +90,13 @@ public:
 
 	//! Extract a set of SQL statements from a specific query
 	DUCKDB_API vector<unique_ptr<SQLStatement>> ExtractStatements(const string &query);
+	//! Extract the logical plan that corresponds to a query
+	DUCKDB_API unique_ptr<LogicalOperator> ExtractPlan(const string &query);
 
 	//! Appends a DataChunk to the specified table
 	DUCKDB_API void Append(TableDescription &description, DataChunk &chunk);
+	//! Appends a ChunkCollection to the specified table
+	DUCKDB_API void Append(TableDescription &description, ChunkCollection &collection);
 
 	//! Returns a relation that produces a table from this connection
 	DUCKDB_API shared_ptr<Relation> Table(const string &tname);

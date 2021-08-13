@@ -1,5 +1,9 @@
 add_definitions(-DDUCKDB)
 
+if(${DISABLE_THREADS})
+  add_definitions(-DDUCKDB_NO_THREADS)
+endif()
+
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS_DEBUG
       "${CMAKE_CXX_FLAGS_DEBUG} -Wextra -Wno-unused-parameter -Wno-redundant-move"
@@ -28,10 +32,12 @@ if(AMALGAMATION_BUILD)
   endif()
 
   add_library(duckdb SHARED "${PROJECT_SOURCE_DIR}/src/amalgamation/duckdb.cpp")
+  target_link_libraries(duckdb ${CMAKE_DL_LIBS})
+  link_threads(duckdb)
+
   add_library(duckdb_static STATIC
               "${PROJECT_SOURCE_DIR}/src/amalgamation/duckdb.cpp")
-
-  link_threads(duckdb)
+  target_link_libraries(duckdb_static ${CMAKE_DL_LIBS})
   link_threads(duckdb_static)
 
   install(FILES "${PROJECT_SOURCE_DIR}/src/amalgamation/duckdb.hpp"

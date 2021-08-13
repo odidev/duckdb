@@ -23,21 +23,21 @@
 
 namespace duckdb {
 
-using namespace parquet;                   // NOLINT
-using namespace apache::thrift;            // NOLINT
-using namespace apache::thrift::protocol;  // NOLINT
-using namespace apache::thrift::transport; // NOLINT
-using namespace duckdb_miniz;              // NOLINT
+using namespace duckdb_parquet;                   // NOLINT
+using namespace duckdb_apache::thrift;            // NOLINT
+using namespace duckdb_apache::thrift::protocol;  // NOLINT
+using namespace duckdb_apache::thrift::transport; // NOLINT
+using namespace duckdb_miniz;                     // NOLINT
 
-using parquet::format::CompressionCodec;
-using parquet::format::ConvertedType;
-using parquet::format::Encoding;
-using parquet::format::FieldRepetitionType;
-using parquet::format::FileMetaData;
-using parquet::format::PageHeader;
-using parquet::format::PageType;
-using parquet::format::RowGroup;
-using parquet::format::Type;
+using duckdb_parquet::format::CompressionCodec;
+using duckdb_parquet::format::ConvertedType;
+using duckdb_parquet::format::Encoding;
+using duckdb_parquet::format::FieldRepetitionType;
+using duckdb_parquet::format::FileMetaData;
+using duckdb_parquet::format::PageHeader;
+using duckdb_parquet::format::PageType;
+using ParquetRowGroup = duckdb_parquet::format::RowGroup;
+using duckdb_parquet::format::Type;
 
 class MyTransport : public TTransport {
 public:
@@ -135,6 +135,10 @@ static void TemplatedWritePlain(Vector &col, idx_t length, ValidityMask &mask, S
 ParquetWriter::ParquetWriter(FileSystem &fs, string file_name_p, vector<LogicalType> types_p, vector<string> names_p,
                              CompressionCodec::type codec)
     : file_name(move(file_name_p)), sql_types(move(types_p)), column_names(move(names_p)), codec(codec) {
+#if STANDARD_VECTOR_SIZE < 64
+	throw NotImplementedException("Parquet writer is not supported for vector sizes < 64");
+#endif
+
 	// initialize the file writer
 	writer = make_unique<BufferedFileWriter>(fs, file_name.c_str(),
 	                                         FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
@@ -142,12 +146,19 @@ ParquetWriter::ParquetWriter(FileSystem &fs, string file_name_p, vector<LogicalT
 	writer->WriteData((const_data_ptr_t) "PAR1", 4);
 	TCompactProtocolFactoryT<MyTransport> tproto_factory;
 	protocol = tproto_factory.getProtocol(make_shared<MyTransport>(*writer));
+
 	file_meta_data.num_rows = 0;
+	file_meta_data.version = 1;
+
+	file_meta_data.__isset.created_by = true;
+	file_meta_data.created_by = "DuckDB";
+
 	file_meta_data.schema.resize(sql_types.size() + 1);
 
+	// populate root schema object
+	file_meta_data.schema[0].name = "duckdb_schema";
 	file_meta_data.schema[0].num_children = sql_types.size();
 	file_meta_data.schema[0].__isset.num_children = true;
-	file_meta_data.version = 1;
 
 	for (idx_t i = 0; i < sql_types.size(); i++) {
 		auto &schema_element = file_meta_data.schema[i + 1];
@@ -167,10 +178,10 @@ void ParquetWriter::Flush(ChunkCollection &buffer) {
 	if (buffer.Count() == 0) {
 		return;
 	}
-	std::lock_guard<std::mutex> glock(lock);
+	lock_guard<mutex> glock(lock);
 
 	// set up a new row group for this chunk collection
-	RowGroup row_group;
+	ParquetRowGroup row_group;
 	row_group.num_rows = 0;
 	row_group.file_offset = writer->GetTotalWritten();
 	row_group.__isset.file_offset = true;
@@ -285,7 +296,7 @@ void ParquetWriter::Flush(ChunkCollection &buffer) {
 				auto *ptr = FlatVector::GetData<date_t>(input_column);
 				for (idx_t r = 0; r < input.size(); r++) {
 					if (mask.RowIsValid(r)) {
-						auto ts = Timestamp::FromDatetime(ptr[r], 0);
+						auto ts = Timestamp::FromDatetime(ptr[r], dtime_t(0));
 						temp_writer.Write<Int96>(TimestampToImpalaTimestamp(ts));
 					}
 				}

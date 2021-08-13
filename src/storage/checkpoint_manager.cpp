@@ -131,6 +131,9 @@ void CheckpointManager::WriteSchema(SchemaCatalogEntry &schema) {
 	vector<TableCatalogEntry *> tables;
 	vector<ViewCatalogEntry *> views;
 	schema.Scan(CatalogType::TABLE_ENTRY, [&](CatalogEntry *entry) {
+		if (entry->internal) {
+			return;
+		}
 		if (entry->type == CatalogType::TABLE_ENTRY) {
 			tables.push_back((TableCatalogEntry *)entry);
 		} else if (entry->type == CatalogType::VIEW_ENTRY) {
@@ -140,11 +143,16 @@ void CheckpointManager::WriteSchema(SchemaCatalogEntry &schema) {
 		}
 	});
 	vector<SequenceCatalogEntry *> sequences;
-	schema.Scan(CatalogType::SEQUENCE_ENTRY,
-	            [&](CatalogEntry *entry) { sequences.push_back((SequenceCatalogEntry *)entry); });
+	schema.Scan(CatalogType::SEQUENCE_ENTRY, [&](CatalogEntry *entry) {
+		D_ASSERT(!entry->internal);
+		sequences.push_back((SequenceCatalogEntry *)entry);
+	});
 
 	vector<MacroCatalogEntry *> macros;
 	schema.Scan(CatalogType::SCALAR_FUNCTION_ENTRY, [&](CatalogEntry *entry) {
+		if (entry->internal) {
+			return;
+		}
 		if (entry->type == CatalogType::MACRO_ENTRY) {
 			macros.push_back((MacroCatalogEntry *)entry);
 		}
@@ -251,13 +259,13 @@ void CheckpointManager::ReadMacro(ClientContext &context, MetaBlockReader &reade
 void CheckpointManager::WriteTable(TableCatalogEntry &table) {
 	// write the table meta data
 	table.Serialize(*metadata_writer);
-	//! write the blockId for the table info
-	metadata_writer->Write<block_id_t>(tabledata_writer->block->id);
-	//! and the offset to where the info starts
-	metadata_writer->Write<uint64_t>(tabledata_writer->offset);
 	// now we need to write the table data
 	TableDataWriter writer(db, table, *tabledata_writer);
-	writer.WriteTableData();
+	auto pointer = writer.WriteTableData();
+
+	//! write the block pointer for the table info
+	metadata_writer->Write<block_id_t>(pointer.block_id);
+	metadata_writer->Write<uint64_t>(pointer.offset);
 }
 
 void CheckpointManager::ReadTable(ClientContext &context, MetaBlockReader &reader) {
@@ -272,7 +280,7 @@ void CheckpointManager::ReadTable(ClientContext &context, MetaBlockReader &reade
 	auto offset = reader.Read<uint64_t>();
 	MetaBlockReader table_data_reader(db, block_id);
 	table_data_reader.offset = offset;
-	TableDataReader data_reader(db, table_data_reader, *bound_info);
+	TableDataReader data_reader(table_data_reader, *bound_info);
 	data_reader.ReadTableData();
 
 	// finally create the table in the catalog

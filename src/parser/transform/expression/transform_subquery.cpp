@@ -4,15 +4,12 @@
 
 namespace duckdb {
 
-unique_ptr<ParsedExpression> Transformer::TransformSubquery(duckdb_libpgquery::PGSubLink *root) {
-	if (!root) {
-		return nullptr;
-	}
+unique_ptr<ParsedExpression> Transformer::TransformSubquery(duckdb_libpgquery::PGSubLink *root, idx_t depth) {
+	D_ASSERT(root);
 	auto subquery_expr = make_unique<SubqueryExpression>();
+
 	subquery_expr->subquery = TransformSelect(root->subselect);
-	if (!subquery_expr->subquery) {
-		return nullptr;
-	}
+	D_ASSERT(subquery_expr->subquery);
 	D_ASSERT(subquery_expr->subquery->node->GetSelectList().size() > 0);
 
 	switch (root->subLinkType) {
@@ -24,7 +21,7 @@ unique_ptr<ParsedExpression> Transformer::TransformSubquery(duckdb_libpgquery::P
 	case duckdb_libpgquery::PG_ALL_SUBLINK: {
 		// comparison with ANY() or ALL()
 		subquery_expr->subquery_type = SubqueryType::ANY;
-		subquery_expr->child = TransformExpression(root->testexpr);
+		subquery_expr->child = TransformExpression(root->testexpr, depth + 1);
 		// get the operator name
 		if (!root->operName) {
 			// simple IN

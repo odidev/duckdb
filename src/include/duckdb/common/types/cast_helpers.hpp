@@ -59,7 +59,7 @@ public:
 	template <class SIGNED, class UNSIGNED>
 	static string_t FormatSigned(SIGNED value, Vector &vector) {
 		int sign = -(value < 0);
-		UNSIGNED unsigned_value = (value ^ sign) - sign;
+		UNSIGNED unsigned_value = UNSIGNED(value ^ sign) - sign;
 		int length = UnsignedLength<UNSIGNED>(unsigned_value) - sign;
 		string_t result = StringVector::EmptyString(vector, length);
 		auto dataptr = result.GetDataWriteable();
@@ -506,11 +506,11 @@ struct IntervalToStringCast {
 				micros = -micros;
 			}
 			int64_t hour = micros / Interval::MICROS_PER_HOUR;
-			micros -= dtime_t(hour) * Interval::MICROS_PER_HOUR;
+			micros -= hour * Interval::MICROS_PER_HOUR;
 			int64_t min = micros / Interval::MICROS_PER_MINUTE;
-			micros -= dtime_t(min) * Interval::MICROS_PER_MINUTE;
+			micros -= min * Interval::MICROS_PER_MINUTE;
 			int64_t sec = micros / Interval::MICROS_PER_SEC;
-			micros -= dtime_t(sec) * Interval::MICROS_PER_SEC;
+			micros -= sec * Interval::MICROS_PER_SEC;
 
 			if (hour < 10) {
 				buffer[length++] = '0';

@@ -2,8 +2,7 @@
 
 ![.github/workflows/main.yml](https://github.com/cwida/duckdb/workflows/.github/workflows/main.yml/badge.svg?branch=master)
 [![CodeFactor](https://www.codefactor.io/repository/github/cwida/duckdb/badge)](https://www.codefactor.io/repository/github/cwida/duckdb)
-[![Coverage Status](https://coveralls.io/repos/github/cwida/duckdb/badge.svg?branch=master)](https://coveralls.io/github/cwida/duckdb?branch=master)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3901452.svg)](https://zenodo.org/record/3901452)
+[![codecov](https://codecov.io/gh/duckdb/duckdb/branch/master/graph/badge.svg?token=FaxjcfFghN)](https://codecov.io/gh/duckdb/duckdb)
 
 
 ## Installation

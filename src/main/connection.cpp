@@ -1,5 +1,5 @@
 #include "duckdb/main/connection.hpp"
-
+#include "duckdb/main/query_profiler.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/appender.hpp"
@@ -12,6 +12,7 @@
 #include "duckdb/execution/operator/persistent/buffered_csv_reader.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/main/connection_manager.hpp"
+#include "duckdb/planner/logical_operator.hpp"
 
 namespace duckdb {
 
@@ -27,9 +28,9 @@ Connection::Connection(DuckDB &database) : Connection(*database.instance) {
 
 string Connection::GetProfilingInformation(ProfilerPrintFormat format) {
 	if (format == ProfilerPrintFormat::JSON) {
-		return context->profiler.ToJSON();
+		return context->profiler->ToJSON();
 	} else {
-		return context->profiler.ToString();
+		return context->profiler->ToString();
 	}
 }
 
@@ -101,8 +102,18 @@ vector<unique_ptr<SQLStatement>> Connection::ExtractStatements(const string &que
 	return context->ParseStatements(query);
 }
 
+unique_ptr<LogicalOperator> Connection::ExtractPlan(const string &query) {
+	return context->ExtractPlan(query);
+}
+
 void Connection::Append(TableDescription &description, DataChunk &chunk) {
-	context->Append(description, chunk);
+	ChunkCollection collection;
+	collection.Append(chunk);
+	Append(description, collection);
+}
+
+void Connection::Append(TableDescription &description, ChunkCollection &collection) {
+	context->Append(description, collection);
 }
 
 shared_ptr<Relation> Connection::Table(const string &table_name) {
@@ -156,6 +167,7 @@ shared_ptr<Relation> Connection::Values(const string &values, const vector<strin
 shared_ptr<Relation> Connection::ReadCSV(const string &csv_file) {
 	BufferedCSVReaderOptions options;
 	options.file_path = csv_file;
+	options.auto_detect = true;
 	BufferedCSVReader reader(*context, options);
 	vector<ColumnDefinition> column_list;
 	for (idx_t i = 0; i < reader.sql_types.size(); i++) {

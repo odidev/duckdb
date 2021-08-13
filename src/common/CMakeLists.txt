@@ -1,7 +1,9 @@
 add_subdirectory(crypto)
 add_subdirectory(enums)
 add_subdirectory(operator)
+add_subdirectory(row_operations)
 add_subdirectory(serializer)
+add_subdirectory(sort)
 add_subdirectory(types)
 add_subdirectory(value_operations)
 add_subdirectory(vector_operations)
@@ -9,15 +11,18 @@ add_subdirectory(vector_operations)
 add_library_unity(
   duckdb_common
   OBJECT
+  allocator.cpp
+  arrow_wrapper.cpp
   assert.cpp
-  bit_operations.cpp
+  radix.cpp
   constants.cpp
   checksum.cpp
   exception.cpp
   exception_format_value.cpp
   file_buffer.cpp
   file_system.cpp
-  gzip_stream.cpp
+  gzip_file_system.cpp
+  pipe_file_system.cpp
   limits.cpp
   printer.cpp
   progress_bar.cpp
@@ -26,7 +31,6 @@ add_library_unity(
   symbols.cpp
   tree_renderer.cpp
   types.cpp
-  fstream_util.cpp
   cycle_counter.cpp)
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:duckdb_common>

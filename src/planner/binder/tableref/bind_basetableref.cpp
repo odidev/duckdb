@@ -70,7 +70,7 @@ unique_ptr<BoundTableRef> Binder::Bind(BaseTableRef &ref) {
 		for (auto &scan : config.replacement_scans) {
 			auto replacement_function = scan.function(ref.table_name, scan.data);
 			if (replacement_function) {
-				replacement_function->alias = ref.alias;
+				replacement_function->alias = ref.alias.empty() ? ref.table_name : ref.alias;
 				replacement_function->column_name_alias = ref.column_name_alias;
 				return Bind(*replacement_function);
 			}
@@ -109,6 +109,7 @@ unique_ptr<BoundTableRef> Binder::Bind(BaseTableRef &ref) {
 		// for the view and for the current query
 		bool inherit_ctes = false;
 		auto view_binder = Binder::CreateBinder(context, this, inherit_ctes);
+		view_binder->can_contain_nulls = true;
 		SubqueryRef subquery(unique_ptr_cast<SQLStatement, SelectStatement>(view_catalog_entry->query->Copy()));
 		subquery.alias = ref.alias.empty() ? ref.table_name : ref.alias;
 		subquery.column_name_alias =
